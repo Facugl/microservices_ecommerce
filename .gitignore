@@ -1,0 +1,43 @@
+# Maven
+/target/
+/pom.xml.tag
+/pom.xml.releaseBackup
+/pom.xml.versionsBackup
+/logs/
+/dependency-reduced-pom.xml
+/release.properties
+/*.iml
+/.idea/
+
+# Eclipse / IntelliJ IDEA / VSCode
+.project
+.classpath
+/.settings/
+/.vscode
+
+# General files
+/.env
+*.log
+*.zip
+*.txt
+
+# Docker
+/.dockerignore
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# Node and other temp files
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dist/
+
+# Spring Boot
+/*.jar
+/*.war
+/*.ear
+
+# OS Files
+.DS_Store
+Thumbs.db

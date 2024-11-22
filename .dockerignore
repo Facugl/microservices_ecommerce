@@ -1,0 +1,40 @@
+# IDE y archivos del sistema
+.vscode/
+.idea/
+*.iml
+*.class
+.DS_Store
+Thumbs.db
+
+# Directorios de construcción de microservicios
+services/*/target/
+services/*/build/
+services/*/out/
+
+# Configuración específica de control de versiones
+.git/
+.gitignore
+
+# Archivos sensibles o configuraciones locales
+.env
+*.env
+
+# Archivos de logs
+*.log
+logs/
+
+# Archivos temporales y binarios
+*.tmp
+*.swp
+*.bak
+*.zip
+*.tar
+*.gz
+*.txt
+
+# Docker Compose overrides
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# Otros
+node_modules/

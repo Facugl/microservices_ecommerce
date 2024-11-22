@@ -1,0 +1,22 @@
+# Ignora archivos y carpetas específicos de desarrollo en Windows y Visual Studio Code
+.vscode/
+.idea/
+*.iml
+*.class
+
+# Ignora archivos de construcción de Java
+target/
+build/
+out/
+
+# Dependencias de Maven y Gradle
+.mvn/
+pom.xml.versionsBackup
+mvnw*
+.gradle/
+
+# Archivos de sistema y de control de versiones
+.DS_Store
+Thumbs.db
+.git/
+.gitignore

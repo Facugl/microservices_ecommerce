@@ -1,0 +1,351 @@
+services:
+  postgres:
+    container_name: postgres-service
+    image: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      - ${POSTGRES_PORT}:5432
+    mem_limit: 512m
+    mem_reservation: 256m
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    container_name: pgadmin-service
+    image: dpage/pgadmin4
+    mem_limit: 512m
+    mem_reservation: 256m
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin:/var/lib/pgadmin
+    ports:
+      - 5050:80
+    networks:
+      - microservices-net
+    restart: unless-stopped
+
+  mongodb:
+    container_name: mongodb-service
+    image: mongo:4.4
+    mem_limit: 512m
+    mem_reservation: 256m
+    ports:
+      - 27017:27017
+    volumes:
+      - mongo:/data
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongo --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo-express:
+    container_name: mongo-express-service
+    image: mongo-express
+    mem_limit: 512m
+    mem_reservation: 256m
+    restart: unless-stopped
+    ports:
+      - 8081:8081
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      ME_CONFIG_MONGODB_SERVER: mongodb
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    mem_limit: 512m
+    mem_reservation: 256m
+    container_name: zookeeper-service
+    environment:
+      ZOOKEEPER_SERVER_ID: 1
+      ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_PORT}
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - 22181:${ZOOKEEPER_PORT}
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 30s
+      retries: 3
+      start_period: 30s
+      timeout: 10s
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    mem_limit: 512m
+    mem_reservation: 256m
+    container_name: kafka-service
+    ports:
+      - ${KAFKA_PORT}:${KAFKA_PORT}
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:${ZOOKEEPER_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${KAFKA_ADVERTISED_LISTENER}
+    networks:
+      - microservices-net
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "kafka-topics",
+          "--bootstrap-server",
+          "localhost:9092",
+          "--list",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mail-dev:
+    container_name: mail-service
+    image: maildev/maildev
+    mem_limit: 512m
+    mem_reservation: 256m
+    ports:
+      - ${MAILDEV_WEB_PORT}:1080
+      - ${MAILDEV_SMTP_PORT}:1025
+    networks:
+      - microservices-net
+    restart: unless-stopped
+
+  config-server:
+    build:
+      context: ./services/config-server
+    image: config:latest
+    mem_limit: 512m
+    mem_reservation: 256m
+    container_name: config-server
+    ports:
+      - 8888:8888
+    environment:
+      - SPRING_PROFILES_ACTIVE=native
+      - EUREKA_INSTANCE_HOSTNAME=config-server
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE}
+    volumes:
+      - ./services/config-server/src/main/resources/configurations:/configurations
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/actuator/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+
+  discovery-service:
+    build:
+      context: ./services/discovery
+    image: discovery:latest
+    mem_limit: 512m
+    mem_reservation: 256m
+    container_name: discovery-service
+    ports:
+      - 8761:8761
+    environment:
+      - SPRING_PROFILES_ACTIVE=native
+      - EUREKA_INSTANCE_HOSTNAME=discovery-service
+      - SPRING_CLOUD_CONFIG_URI=${SPRING_CLOUD_CONFIG_URI}
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE}
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8761/actuator/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    depends_on:
+      config-server:
+        condition: service_healthy
+
+  gateway-service:
+    build:
+      context: ./services/gateway
+    image: gateway:latest
+    mem_limit: 512m
+    mem_reservation: 256m
+    container_name: gateway-service
+    ports:
+      - 8222:8222
+    environment:
+      - SPRING_CLOUD_CONFIG_URI=${SPRING_CLOUD_CONFIG_URI}
+    networks:
+      - microservices-net
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-service:
+        condition: service_healthy
+    restart: unless-stopped
+
+  customer-service:
+    build:
+      context: ./services/customer
+    image: customer:latest
+    mem_limit: 512m
+    mem_reservation: 256m
+    container_name: customer-service
+    ports:
+      - 8090:8090
+    environment:
+      - SPRING_CLOUD_CONFIG_URI=${SPRING_CLOUD_CONFIG_URI}
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE}
+      - SPRING_DATA_MONGODB_HOST=${MONGO_HOST}
+      - SPRING_DATA_MONGODB_PORT=${MONGO_PORT}
+      - SPRING_DATA_MONGODB_USERNAME=${MONGO_INITDB_ROOT_USERNAME}
+      - SPRING_DATA_MONGODB_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD}
+    networks:
+      - microservices-net
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-service:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/actuator/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  notification-service:
+    container_name: notification-service
+    build:
+      context: ./services/notification
+    image: notification:latest
+    mem_limit: 512m
+    mem_reservation: 256m
+    ports:
+      - 8040:8040
+    environment:
+      - SPRING_CLOUD_CONFIG_URI=${SPRING_CLOUD_CONFIG_URI}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      - SPRING_MAIL_HOST=${MAILDEV_HOST}
+      - SPRING_MAIL_PORT=${MAILDEV_SMTP_PORT}
+      - SPRING_DATA_MONGODB_HOST=${MONGO_HOST}
+      - SPRING_DATA_MONGODB_PORT=${MONGO_PORT}
+      - SPRING_DATA_MONGODB_USERNAME=${MONGO_INITDB_ROOT_USERNAME}
+      - SPRING_DATA_MONGODB_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD}
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      mail-dev:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+  order-service:
+    container_name: order-service
+    build:
+      context: ./services/order
+    image: order:latest
+    mem_limit: 512m
+    mem_reservation: 256m
+    ports:
+      - 8070:8070
+    environment:
+      - SPRING_CLOUD_CONFIG_URI=${SPRING_CLOUD_CONFIG_URI}
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/order
+      - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER}
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+    depends_on:
+      config-server:
+        condition: service_healthy
+      discovery-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+  payment-service:
+    build:
+      context: ./services/payment
+    image: payment:latest
+    mem_limit: 512m
+    mem_reservation: 256m
+    ports:
+      - 8060:8060
+    networks:
+      - microservices-net
+    environment:
+      - SPRING_CLOUD_CONFIG_URI=${SPRING_CLOUD_CONFIG_URI}
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/payment
+      - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER}
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD}
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  product-service:
+    build:
+      context: ./services/product
+    image: product:latest
+    mem_limit: 512m
+    mem_reservation: 256m
+    ports:
+      - 8050:8050
+    networks:
+      - microservices-net
+    environment:
+      - SPRING_CLOUD_CONFIG_URI=${SPRING_CLOUD_CONFIG_URI}
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/product
+      - SPRING_DATASOURCE_USERNAME=${POSTGRES_USER}
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+networks:
+  microservices-net:
+    driver: bridge
+
+volumes:
+  postgres:
+  pgadmin:
+  mongo:
